@@ -1,0 +1,54 @@
+name: Deploy site to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The openai/math submodule is ~2.4 GB, but the build only reads a few
+      # index files. Fetch just those, at the commit the submodule pins.
+      - name: Sparse-fetch pinned openai/math
+        run: |
+          sha=$(git ls-tree HEAD math | awk '{print $3}')
+          rm -rf math && git init -q math && cd math
+          git remote add origin https://github.com/openai/math
+          git sparse-checkout set --no-cone /overview.tex /CONTENTS.md /README.md \
+            /lean/formalization.yaml '/preprints/*/README.md'
+          git fetch -q --depth 1 --filter=blob:none origin "$sha"
+          git checkout -q FETCH_HEAD
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build
+        run: python3 scripts/build.py --src math --out _site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
