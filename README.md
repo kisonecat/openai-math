@@ -14,6 +14,12 @@ the files upstream already ships.
 | `lean/formalization.yaml` | which papers have a formalized main result |
 | `README.md` | which families have reasoning summaries |
 | `preprints/*/README.md` | BibTeX |
+| `preprints/*/*.pdf` | page counts |
+
+Page counts come from a small stdlib PDF parser. The PDFs total ~400 MB, so
+counts are cached in `data/pdf-pages.json` keyed by git blob hash; the build
+reads only PDFs missing from the cache (in CI, `git cat-file` lazily fetches
+just those blobs). Commit the updated cache after bumping the submodule.
 
 ## Build locally
 
@@ -36,6 +42,7 @@ family), `all.html` (search/filter everything), and `papers.json`.
 
 ```sh
 git submodule update --remote math
-git commit -am "Bump openai/math"
+python3 scripts/build.py          # refreshes data/pdf-pages.json
+git add math data && git commit -m "Bump openai/math"
 git push
 ```

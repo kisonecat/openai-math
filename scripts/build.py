@@ -8,6 +8,7 @@ Everything is parsed from files the upstream repository already ships:
   lean/formalization.yaml  which papers have a formalized main result
   README.md                which families have released reasoning summaries
   preprints/*/README.md    BibTeX for each paper
+  preprints/*/*.pdf        page counts (cached in data/pdf-pages.json by blob hash)
 
 Usage: python3 scripts/build.py [--src math] [--out _site]
 """
@@ -18,7 +19,9 @@ import html
 import json
 import re
 import shutil
+import subprocess
 import unicodedata
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -166,6 +169,105 @@ def parse_bibtex(src, d):
     return m.group(1).strip() if m else None
 
 
+# --------------------------------------------------------------------------
+# PDF page counts
+#
+# The PDFs total ~400 MB, so counts are cached by git blob hash in
+# data/pdf-pages.json. Hashes come from `git ls-tree`, which works in a
+# blobless sparse clone; only PDFs missing from the cache are read, via
+# `git cat-file`, which lazily fetches just those blobs in CI.
+
+PAGES_CACHE = ROOT / "data" / "pdf-pages.json"
+
+
+def _object_bodies(data):
+    """The raw file, plus each decompressed object stream (PDF 1.5+)."""
+    yield data
+    for m in re.finditer(rb"<<((?:(?!>>\s*stream).){0,400}?/ObjStm.{0,400}?)>>\s*stream\r?\n",
+                         data, flags=re.S):
+        try:
+            yield zlib.decompressobj().decompress(data[m.end():])
+        except zlib.error:
+            pass
+
+
+def _enclosing_dict(buf, pos):
+    """Return the << ... >> dictionary containing byte offset pos."""
+    depth, i = 0, pos
+    while True:
+        i = max(buf.rfind(b"<<", 0, i), buf.rfind(b">>", 0, i))
+        if i < 0:
+            return None
+        if buf[i:i + 2] == b">>":
+            depth += 1
+        elif depth == 0:
+            break
+        else:
+            depth -= 1
+    start, depth, j = i, 0, i
+    while True:
+        a, b = buf.find(b"<<", j), buf.find(b">>", j)
+        if b < 0:
+            return None
+        if 0 <= a < b:
+            depth, j = depth + 1, a + 2
+        else:
+            depth, j = depth - 1, b + 2
+            if depth == 0:
+                return buf[start:j]
+
+
+def pdf_page_count(data):
+    """Page count = largest /Count on a /Type /Pages node (the root)."""
+    best = 0
+    for buf in _object_bodies(data):
+        for m in re.finditer(rb"/Type\s*/Pages\b", buf):
+            d = _enclosing_dict(buf, m.start())
+            c = d and re.search(rb"/Count\s+(\d+)", d)
+            if c:
+                best = max(best, int(c.group(1)))
+    return best or None
+
+
+def page_counts(src, paths):
+    """Map repo-relative PDF path -> page count."""
+    cache = json.loads(PAGES_CACHE.read_text()) if PAGES_CACHE.exists() else {}
+    try:
+        tree = subprocess.run(["git", "-C", str(src), "ls-tree", "-r", "HEAD", "--", "preprints"],
+                              capture_output=True, text=True, check=True).stdout
+        blobs = {line.split("\t", 1)[1]: line.split()[2] for line in tree.splitlines()}
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        blobs = {}
+    out, fetched = {}, 0
+    for path in paths:
+        sha = blobs.get(path)
+        if sha and sha in cache:
+            out[path] = cache[sha]
+            continue
+        f = src / path
+        if f.exists():
+            data = f.read_bytes()
+        elif sha:
+            data = subprocess.run(["git", "-C", str(src), "cat-file", "blob", sha],
+                                  capture_output=True, check=True).stdout
+        else:
+            print(f"warning: cannot read {path}")
+            continue
+        n = pdf_page_count(data)
+        if n is None:
+            print(f"warning: no page count for {path}")
+            continue
+        out[path] = n
+        fetched += 1
+        if sha:
+            cache[sha] = n
+    if fetched:
+        print(f"counted pages in {fetched} PDFs not in {PAGES_CACHE.relative_to(ROOT)}")
+        PAGES_CACHE.parent.mkdir(exist_ok=True)
+        PAGES_CACHE.write_text(json.dumps(dict(sorted(cache.items())), indent=0) + "\n")
+    return out
+
+
 def load(src):
     subjects, fam_subject = parse_overview(src)
     families, papers = parse_contents(src)
@@ -184,6 +286,7 @@ def load(src):
         f["subject"] = fam_subject[f["num"]]
         f["trace"] = traces.get(f["num"])
         f["papers"] = []
+    pages = page_counts(src, [p["path"] for p in papers])
     for p in papers:
         dt = date_from_dir(p["dir"])
         p.update({
@@ -193,6 +296,7 @@ def load(src):
             "source": TREE + "preprints/" + p["dir"],
             "lean": p["dir"] in lean,
             "bibtex": parse_bibtex(src, p["dir"]),
+            "pages": pages.get(p["path"]),
             "subject": fam_subject[p["family"]],
         })
         families[p["family"]]["papers"].append(p)
@@ -254,11 +358,12 @@ def paper_card(p, families, *, show_subject=False, show_family=True):
                       f'title="{E(plain(fam["title"]))}">No. {fam["num"]}</a>')
     if p["lean"]:
         badges.append('<span class="badge lean" title="Main result formalized in Lean">Lean ✓</span>')
+    pages = f'<span class="pages">{p["pages"]} pages</span>' if p["pages"] else ""
     bib = (f'<button class="act copy-bib" type="button" data-bib="{E(p["bibtex"])}">BibTeX</button>'
            if p["bibtex"] else "")
-    return f"""<article class="paper" data-date="{p['date']}" data-lean="{int(p['lean'])}" data-fam="{fam['num']}">
+    return f"""<article class="paper" data-date="{p['date']}" data-pages="{p['pages'] or ''}" data-lean="{int(p['lean'])}" data-fam="{fam['num']}">
   <h3 class="paper-title"><a href="{E(p['pdf'])}">{md_inline(p['title'])}</a></h3>
-  <div class="meta"><time datetime="{p['date']}">{p['date_h']}</time>{''.join(badges)}</div>
+  <div class="meta"><time datetime="{p['date']}">{p['date_h']}</time>{pages}{''.join(badges)}</div>
   <div class="abstract">{md_inline(p['abstract'])}</div>
   <div class="actions">
     <a class="act primary" href="{E(p['pdf'])}">PDF</a>
@@ -311,6 +416,8 @@ def controls(placeholder, *, grouping=True):
         <option value="new">Newest first</option>
         <option value="old">Oldest first</option>
         <option value="title">Title A–Z</option>
+        <option value="long">Longest first</option>
+        <option value="short">Shortest first</option>
       </select>
     </label>
     <span class="status" id="status" aria-live="polite"></span>
@@ -442,7 +549,7 @@ def build(src, out):
                                        desc=f"Search all {len(papers)} openai/math manuscripts."))
 
     # Machine-readable data
-    data = [{k: p[k] for k in ("title", "date", "subject", "family", "pdf", "source", "lean")}
+    data = [{k: p[k] for k in ("title", "date", "pages", "subject", "family", "pdf", "source", "lean")}
             | {"title": plain(p["title"]), "abstract": plain(p["abstract"]),
                "family_title": plain(families[p["family"]]["title"])} for p in papers]
     (out / "papers.json").write_text(json.dumps(data, ensure_ascii=False, indent=1))

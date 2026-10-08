@@ -4,7 +4,7 @@
 
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
-  const norm = (s) => s.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const norm = (s) => s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
   // ---- Math -------------------------------------------------------------
   function renderMath(root) {
@@ -62,6 +62,7 @@
         el, i,
         home: el.parentElement,
         date: el.dataset.date,
+        pages: +el.dataset.pages || 0,
         title: norm($(".paper-title", el).textContent.trim()),
         lean: el.dataset.lean === "1",
         subject: el.closest(".subject-group")?.id || null,
@@ -97,6 +98,8 @@
         case "new": return b.date.localeCompare(a.date) || a.i - b.i;
         case "old": return a.date.localeCompare(b.date) || a.i - b.i;
         case "title": return a.title.localeCompare(b.title);
+        case "long": return b.pages - a.pages || a.i - b.i;
+        case "short": return (a.pages || Infinity) - (b.pages || Infinity) || a.i - b.i;
         default: return a.i - b.i;
       }
     }
