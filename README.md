@@ -15,28 +15,41 @@ the files upstream already ships.
 | `README.md` | which families have reasoning summaries |
 | `preprints/*/README.md` | BibTeX |
 | `preprints/*/*.pdf` | page counts |
+| `preprints/**/*.tex`, `*.bib` | full-text source search |
 
 Page counts come from a small stdlib PDF parser. The PDFs total ~400 MB, so
 counts are cached in `data/pdf-pages.json` keyed by git blob hash; the build
 reads only PDFs missing from the cache (in CI, `git cat-file` lazily fetches
 just those blobs). Commit the updated cache after bumping the submodule.
 
+## Full-text source search
+
+`search.html` searches the words in every `.tex` and `.bib` file without a
+server. `scripts/fulltext.py` writes a word → files index, sharded by word
+prefix (`fts/s/*.json`, ~6 MB gzipped in total; a query loads one shard per
+word). The browser intersects the postings, ranks files, then fetches the
+top matches from `raw.githubusercontent.com` at the pinned commit to show
+matching lines, each linking to `github.com/openai/math/blob/<sha>/…#L<n>`.
+Tokenization in `fulltext.py` and `site/search.js` must stay in sync.
+
 ## Build locally
 
 ```sh
 git submodule update --init      # or see the workflow for a 4 MB sparse fetch
-python3 scripts/build.py         # writes _site/
+python3 scripts/build.py         # writes _site/ (--no-fulltext to skip the index)
 python3 -m http.server -d _site
 ```
 
 ## Layout
 
 - `scripts/build.py`: parser and HTML generator (Python stdlib only)
-- `site/`: static assets copied into the output (`style.css`, `app.js`, favicon)
+- `scripts/fulltext.py`: full-text index of the LaTeX sources
+- `site/`: static assets copied into the output (`style.css`, `app.js`, `search.js`, favicon)
 - `.github/workflows/pages.yml`: builds and deploys to GitHub Pages on push
 
 Output: `index.html` (subjects), one page per subject (papers grouped by
-family), `all.html` (search/filter everything), and `papers.json`.
+family), `all.html` (search/filter everything), `search.html` (full-text source
+search), and `papers.json`.
 
 ## Updating
 

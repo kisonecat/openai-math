@@ -9,8 +9,9 @@ Everything is parsed from files the upstream repository already ships:
   README.md                which families have released reasoning summaries
   preprints/*/README.md    BibTeX for each paper
   preprints/*/*.pdf        page counts (cached in data/pdf-pages.json by blob hash)
+  preprints/**/*.tex,.bib  full-text search index (see fulltext.py)
 
-Usage: python3 scripts/build.py [--src math] [--out _site]
+Usage: python3 scripts/build.py [--src math] [--out _site] [--no-fulltext]
 """
 
 import argparse
@@ -23,6 +24,8 @@ import subprocess
 import unicodedata
 import zlib
 from pathlib import Path
+
+import fulltext
 
 ROOT = Path(__file__).resolve().parent.parent
 REPO_URL = "https://github.com/openai/math"
@@ -309,7 +312,7 @@ def load(src):
 E = html.escape
 
 
-def page(title, body, *, desc="", depth="", script=True):
+def page(title, body, *, desc="", depth="", script=True, extra_js=""):
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -326,12 +329,14 @@ def page(title, body, *, desc="", depth="", script=True):
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
 {f'<script defer src="{depth}app.js"></script>' if script else ''}
+{f'<script defer src="{depth}{extra_js}"></script>' if extra_js else ''}
 </head>
 <body>
 <header class="topbar">
   <a class="brand" href="{depth}index.html"><span class="brand-mark">∮</span> OpenAI Math <span class="brand-sub">manuscript index</span></a>
   <nav class="topnav">
     <a href="{depth}all.html">All papers</a>
+    <a href="{depth}search.html">Search source</a>
     <a href="{REPO_URL}">GitHub</a>
   </nav>
 </header>
@@ -434,7 +439,7 @@ def subject_nav(subjects, current, info):
     return f'<nav class="subjects-nav" aria-label="Subjects"><h2>Subjects</h2><ul>{"".join(items)}</ul></nav>'
 
 
-def build(src, out):
+def build(src, out, *, full_text=True):
     subjects, families, papers = load(src)
 
     # Spread hues around the wheel, stepping by ~7/17 of a turn so neighbours differ.
@@ -446,6 +451,7 @@ def build(src, out):
                    "lean": sum(p["lean"] for f in fams for p in f["papers"])}
     for p in papers:
         p["slug"], p["hue"] = info[p["subject"]]["slug"], info[p["subject"]]["hue"]
+        p["title_html"] = md_inline(p["title"])
 
     if out.exists():
         shutil.rmtree(out)
@@ -473,6 +479,7 @@ def build(src, out):
     <input name="q" type="search" placeholder="Search titles and abstracts — e.g. “Riemann”, “spin glass”, “matroid”" autocomplete="off">
     <button type="submit">Search</button>
   </form>
+  <p class="hero-alt">Looking for a word inside the papers? <a href="search.html">Search the LaTeX source →</a></p>
   <dl class="stats">
     <div><dt>Manuscripts</dt><dd>{len(papers)}</dd></div>
     <div><dt>Families</dt><dd>{len(families)}</dd></div>
@@ -548,6 +555,40 @@ def build(src, out):
     (out / "all.html").write_text(page("All papers — OpenAI Math index", body,
                                        desc=f"Search all {len(papers)} openai/math manuscripts."))
 
+    # Full-text search over the LaTeX sources
+    counts = fulltext.build_index(src, out / "fts", papers) if full_text else None
+    if counts:
+        n_tex, n_bib = counts
+        examples = "".join(f'<button type="button" class="chip example" data-q="{E(q)}">{E(q)}</button>'
+                           for q in ["varifold", '"spin glass"', "Selmer", "Kähler", "Carleson", "tikzcd"])
+        opts = "".join(f'<option value="{info[s]["slug"]}">{E(s)}</option>' for s in subjects)
+        body = f"""<main class="content wide">
+  <header class="subject-head">
+    <h1>Search the LaTeX source</h1>
+    <p class="lede">Full-text search over {n_tex:,} <code>.tex</code> and {n_bib:,} <code>.bib</code> files
+    from all {len(papers)} manuscripts. Matching lines link to the exact line on GitHub.</p>
+  </header>
+  <form class="controls" role="search" id="fts-form">
+    <div class="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Words in the source — e.g. varifold, &quot;spin glass&quot;, mathbb" autocomplete="off" spellcheck="false">
+      <kbd>/</kbd>
+    </div>
+    <div class="control-row">
+      <label class="sel">Subject
+        <select id="subject"><option value="">All subjects</option>{opts}</select>
+      </label>
+      <span class="hint">All words must appear in a file. Words of 4+ letters also match longer words (<i>varifo</i> → <i>varifolds</i>); use “quotes” to require words in order.</span>
+      <span class="status" id="status" aria-live="polite"></span>
+    </div>
+  </form>
+  <div class="examples" id="examples"><span>Try:</span>{examples}</div>
+  <div id="results" class="results"></div>
+  <p class="more-wrap"><button type="button" class="act" id="more" hidden>Show more papers</button></p>
+</main>"""
+        (out / "search.html").write_text(page("Search source — OpenAI Math index", body, extra_js="search.js",
+                                              desc="Full-text search of the LaTeX sources in openai/math."))
+
     # Machine-readable data
     data = [{k: p[k] for k in ("title", "date", "pages", "subject", "family", "pdf", "source", "lean")}
             | {"title": plain(p["title"]), "abstract": plain(p["abstract"]),
@@ -561,5 +602,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--src", type=Path, default=ROOT / "math")
     ap.add_argument("--out", type=Path, default=ROOT / "_site")
+    ap.add_argument("--no-fulltext", action="store_true", help="skip the source search index")
     a = ap.parse_args()
-    build(a.src, a.out)
+    build(a.src, a.out, full_text=not a.no_fulltext)

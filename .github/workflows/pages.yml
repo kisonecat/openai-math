@@ -20,15 +20,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The openai/math submodule is ~2.4 GB, but the build only reads a few
-      # index files. Fetch just those, at the commit the submodule pins.
+      # The openai/math submodule is ~2.4 GB, but the build only reads the
+      # index files and the LaTeX sources (~150 MB, for full-text search).
+      # Fetch just those, at the commit the submodule pins. PDFs needed for
+      # uncached page counts are fetched lazily by scripts/build.py.
       - name: Sparse-fetch pinned openai/math
         run: |
           sha=$(git ls-tree HEAD math | awk '{print $3}')
           rm -rf math && git init -q math && cd math
           git remote add origin https://github.com/openai/math
           git sparse-checkout set --no-cone /overview.tex /CONTENTS.md /README.md \
-            /lean/formalization.yaml '/preprints/*/README.md'
+            /lean/formalization.yaml '/preprints/*/README.md' \
+            '/preprints/**/*.tex' '/preprints/**/*.bib'
           git fetch -q --depth 1 --filter=blob:none origin "$sha"
           git checkout -q FETCH_HEAD
 
