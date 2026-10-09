@@ -490,7 +490,10 @@ def build(src, out, *, full_text=True):
   The green Lean checkmark marks the {n_lean} papers listed in
   <a href="{BLOB}lean/formalization.yaml"><code>lean/formalization.yaml</code></a>,
   for which OpenAI claims a Lean formalization of the main result. This index
-  reports that claim as listed upstream; it does not build or check the Lean code.</p>
+  reports that claim as listed upstream; it does not build or check the Lean code.
+  For a comparison of the Lean statements with the theorems in the papers, see
+  <a href="https://leanprover.zulipchat.com/user_uploads/3121/dAZEfE9dCczTF5qxWVF7QZKk/openai-math-lean-statements.pdf">“Do
+  the Lean statements in openai/math match their papers?”</a> (PDF, shared on the Lean Zulip).</p>
 </section>
 <section class="tiles-wrap">
   <h2 class="section-h">Browse by subject</h2>
