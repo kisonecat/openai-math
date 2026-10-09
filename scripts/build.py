@@ -362,7 +362,7 @@ def paper_card(p, families, *, show_subject=False, show_family=True):
         badges.append(f'<a class="badge fam" href="{p["slug"]}.html#f{fam["num"]}" '
                       f'title="{E(plain(fam["title"]))}">No. {fam["num"]}</a>')
     if p["lean"]:
-        badges.append('<span class="badge lean" title="Main result formalized in Lean">Lean ✓</span>')
+        badges.append('<span class="badge lean" title="OpenAI claims Lean formalization">Lean ✓</span>')
     pages = f'<span class="pages">{p["pages"]} pages</span>' if p["pages"] else ""
     bib = (f'<button class="act copy-bib" type="button" data-bib="{E(p["bibtex"])}">BibTeX</button>'
            if p["bibtex"] else "")
@@ -486,6 +486,11 @@ def build(src, out, *, full_text=True):
     <div><dt>Lean-formalized</dt><dd>{n_lean}</dd></div>
     <div><dt>Dated</dt><dd>{datetime.date.fromisoformat(dates[0]):%b %-d}–{datetime.date.fromisoformat(dates[-1]):%b %-d, %Y}</dd></div>
   </dl>
+  <p class="lean-note"><span class="badge lean" aria-hidden="true">Lean ✓</span>
+  The green Lean checkmark marks the {n_lean} papers listed in
+  <a href="{BLOB}lean/formalization.yaml"><code>lean/formalization.yaml</code></a>,
+  for which OpenAI claims a Lean formalization of the main result. This index
+  reports that claim as listed upstream; it does not build or check the Lean code.</p>
 </section>
 <section class="tiles-wrap">
   <h2 class="section-h">Browse by subject</h2>

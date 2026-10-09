@@ -123,6 +123,9 @@ a:hover { text-decoration-thickness: 2px; }
 .stats div { display: flex; flex-direction: column-reverse; }
 .stats dt { color: var(--ink-3); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
 .stats dd { margin: 0; font: 600 24px/1.2 var(--serif); font-variant-numeric: tabular-nums; }
+.lean-note { margin: 20px 0 0; max-width: 64ch; font-size: 13.5px; color: var(--ink-3); line-height: 1.55; }
+.lean-note .badge { margin-right: 4px; vertical-align: 1px; }
+.lean-note code { font-size: .92em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
 
 .section-h {
   font: 600 13px var(--sans); text-transform: uppercase; letter-spacing: .08em;
